@@ -6567,6 +6567,37 @@ fn test_bar_execution_fills_stop_order(
 }
 
 #[rstest]
+#[case(0)]
+#[case(3)]
+fn test_bar_execution_uses_minimum_synthetic_trade_size_for_small_volume(
+    #[case] volume_raw: u64,
+    instrument_eth_usdt: InstrumentAny,
+) {
+    let config = OrderMatchingEngineConfig {
+        bar_execution: true,
+        ..Default::default()
+    };
+    let mut engine =
+        get_order_matching_engine(instrument_eth_usdt.clone(), None, None, Some(config), None);
+
+    let bar_type = BarType::from("ETHUSDT-PERP.BINANCE-1-MINUTE-LAST-EXTERNAL");
+    let bar = Bar {
+        bar_type,
+        open: Price::from("1000.00"),
+        high: Price::from("1001.00"),
+        low: Price::from("999.00"),
+        close: Price::from("1000.50"),
+        volume: Quantity::from_raw(volume_raw.into(), instrument_eth_usdt.size_precision()),
+        ts_event: UnixNanos::from(1u64),
+        ts_init: UnixNanos::from(1u64),
+    };
+
+    engine.process_bar(&bar);
+
+    assert_eq!(engine.get_core().last, Some(bar.close));
+}
+
+#[rstest]
 fn test_bar_adaptive_ordering_fills_low_side_first(
     instrument_eth_usdt: InstrumentAny,
     order_event_handler: TypedIntoMessageSavingHandler<OrderEventAny>,

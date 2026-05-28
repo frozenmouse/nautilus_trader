@@ -72,6 +72,34 @@ use crate::{
     trailing::trailing_stop_calculate,
 };
 
+fn compute_bar_quarter_sizes(
+    volume_raw: QuantityRaw,
+    min_size_raw: QuantityRaw,
+) -> (QuantityRaw, QuantityRaw) {
+    let mut quarter_raw = volume_raw / 4;
+
+    // Round down to nearest size increment, ensuring minimum.
+    quarter_raw = (quarter_raw / min_size_raw) * min_size_raw;
+    if quarter_raw < min_size_raw {
+        quarter_raw = min_size_raw;
+    }
+
+    // Calculate close size from remaining volume after three quarters, also rounded.
+    let three_quarters = quarter_raw * 3;
+    let mut close_raw = if three_quarters >= volume_raw {
+        min_size_raw
+    } else {
+        volume_raw - three_quarters
+    };
+
+    close_raw = (close_raw / min_size_raw) * min_size_raw;
+    if close_raw < min_size_raw {
+        close_raw = min_size_raw;
+    }
+
+    (quarter_raw, close_raw)
+}
+
 /// An order matching engine for a single market.
 pub struct OrderMatchingEngine {
     /// The venue for the matching engine.
@@ -1498,11 +1526,10 @@ impl OrderMatchingEngine {
     }
 
     fn process_trade_ticks_from_bar(&mut self, bar: &Bar) {
-        // Split the bar into 4 trades, adding remainder to close trade
-        let quarter_raw = bar.volume.raw / 4;
-        let remainder_raw = bar.volume.raw % 4;
+        let min_size_raw = self.instrument.size_increment().raw;
+        let (quarter_raw, close_raw) = compute_bar_quarter_sizes(bar.volume.raw, min_size_raw);
         let size = Quantity::from_raw(quarter_raw, bar.volume.precision);
-        let close_size = Quantity::from_raw(quarter_raw + remainder_raw, bar.volume.precision);
+        let close_size = Quantity::from_raw(close_raw, bar.volume.precision);
 
         let aggressor_side = if self.core.last.is_none_or(|last| bar.open > last) {
             AggressorSide::Buyer
@@ -1621,16 +1648,16 @@ impl OrderMatchingEngine {
         let bid_bar = self.last_bar_bid.unwrap();
         let ask_bar = self.last_bar_ask.unwrap();
 
-        // Split bar volume into 4, adding remainder to close quote
-        let bid_quarter = bid_bar.volume.raw / 4;
-        let bid_remainder = bid_bar.volume.raw % 4;
-        let ask_quarter = ask_bar.volume.raw / 4;
-        let ask_remainder = ask_bar.volume.raw % 4;
+        let min_size_raw = self.instrument.size_increment().raw;
+        let (bid_quarter, bid_close_raw) =
+            compute_bar_quarter_sizes(bid_bar.volume.raw, min_size_raw);
+        let (ask_quarter, ask_close_raw) =
+            compute_bar_quarter_sizes(ask_bar.volume.raw, min_size_raw);
 
         let bid_size = Quantity::from_raw(bid_quarter, bar.volume.precision);
         let ask_size = Quantity::from_raw(ask_quarter, bar.volume.precision);
-        let bid_close_size = Quantity::from_raw(bid_quarter + bid_remainder, bar.volume.precision);
-        let ask_close_size = Quantity::from_raw(ask_quarter + ask_remainder, bar.volume.precision);
+        let bid_close_size = Quantity::from_raw(bid_close_raw, bar.volume.precision);
+        let ask_close_size = Quantity::from_raw(ask_close_raw, bar.volume.precision);
 
         // Create reusable quote tick
         let mut quote_tick = QuoteTick::new(
